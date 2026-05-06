@@ -20,5 +20,4 @@ A lightweight iOS WebView wrapper for ChatGPT’s web app. Built with Swift and 
 2. Choose your device or simulator
 3. Hit “Run” to build
 
-## License
-MIT
+oogabooga
