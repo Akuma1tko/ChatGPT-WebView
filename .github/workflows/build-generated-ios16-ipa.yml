@@ -1,0 +1,299 @@
+name: Build Generated iOS 16 IPA
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-generated-ios16-ipa.yml"
+  workflow_dispatch:
+    inputs:
+      deployment_target:
+        description: "Minimum iOS deployment target"
+        required: false
+        default: "16.0"
+
+permissions:
+  contents: read
+
+jobs:
+  build-generated-ios16-ipa:
+    name: Build generated iOS 16 unsigned IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: |
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Generate clean WebView source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf GeneratedChatGPTWebView ChatGPTWebView.xcodeproj project.yml build
+          mkdir -p GeneratedChatGPTWebView
+
+          cat > GeneratedChatGPTWebView/ChatGPTWebViewApp.swift <<'SWIFT'
+          import SwiftUI
+
+          @main
+          struct ChatGPTWebViewApp: App {
+              var body: some Scene {
+                  WindowGroup {
+                      ContentView()
+                  }
+              }
+          }
+          SWIFT
+
+          cat > GeneratedChatGPTWebView/ContentView.swift <<'SWIFT'
+          import SwiftUI
+
+          struct ContentView: View {
+              var body: some View {
+                  SecureChatGPTWebView(url: URL(string: "https://chatgpt.com/")!)
+                      .ignoresSafeArea(.keyboard, edges: .bottom)
+              }
+          }
+          SWIFT
+
+          cat > GeneratedChatGPTWebView/SecureChatGPTWebView.swift <<'SWIFT'
+          import SwiftUI
+          import WebKit
+
+          struct SecureChatGPTWebView: UIViewRepresentable {
+              let url: URL
+
+              func makeCoordinator() -> Coordinator {
+                  Coordinator()
+              }
+
+              func makeUIView(context: Context) -> WKWebView {
+                  let configuration = WKWebViewConfiguration()
+                  configuration.websiteDataStore = .default()
+                  configuration.allowsInlineMediaPlayback = true
+
+                  if #available(iOS 14.0, *) {
+                      configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+                  }
+
+                  let webView = WKWebView(frame: .zero, configuration: configuration)
+                  webView.navigationDelegate = context.coordinator
+                  webView.uiDelegate = context.coordinator
+                  webView.allowsBackForwardNavigationGestures = true
+                  webView.scrollView.keyboardDismissMode = .interactive
+                  webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+                  webView.load(URLRequest(url: url))
+                  return webView
+              }
+
+              func updateUIView(_ webView: WKWebView, context: Context) {
+                  if webView.url == nil {
+                      webView.load(URLRequest(url: url))
+                  }
+              }
+
+              final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+                  private let allowedHostSuffixes = [
+                      "chatgpt.com",
+                      "openai.com",
+                      "oaistatic.com",
+                      "oaiusercontent.com"
+                  ]
+
+                  func webView(_ webView: WKWebView,
+                               decidePolicyFor navigationAction: WKNavigationAction,
+                               decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                      guard let url = navigationAction.request.url else {
+                          decisionHandler(.cancel)
+                          return
+                      }
+
+                      decisionHandler(isAllowed(url: url) ? .allow : .cancel)
+                  }
+
+                  private func isAllowed(url: URL) -> Bool {
+                      guard let scheme = url.scheme?.lowercased() else {
+                          return false
+                      }
+
+                      if scheme == "about" || scheme == "blob" {
+                          return true
+                      }
+
+                      guard scheme == "https", let host = url.host?.lowercased() else {
+                          return false
+                      }
+
+                      return allowedHostSuffixes.contains { suffix in
+                          host == suffix || host.hasSuffix("." + suffix)
+                      }
+                  }
+
+                  @available(iOS 15.0, *)
+                  func webView(_ webView: WKWebView,
+                               requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                               initiatedByFrame frame: WKFrameInfo,
+                               type: WKMediaCaptureType,
+                               decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+                      decisionHandler(.prompt)
+                  }
+              }
+          }
+          SWIFT
+
+          cat > GeneratedChatGPTWebView/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>$(DEVELOPMENT_LANGUAGE)</string>
+              <key>CFBundleDisplayName</key>
+              <string>ChatGPT WebView</string>
+              <key>CFBundleExecutable</key>
+              <string>$(EXECUTABLE_NAME)</string>
+              <key>CFBundleIdentifier</key>
+              <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>$(PRODUCT_NAME)</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>$(MARKETING_VERSION)</string>
+              <key>CFBundleVersion</key>
+              <string>$(CURRENT_PROJECT_VERSION)</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>NSMicrophoneUsageDescription</key>
+              <string>Microphone access is used only when ChatGPT web voice input requests it.</string>
+              <key>NSSpeechRecognitionUsageDescription</key>
+              <string>Speech recognition is used only when ChatGPT web voice input requests it.</string>
+              <key>UIApplicationSupportsIndirectInputEvents</key>
+              <true/>
+              <key>UILaunchScreen</key>
+              <dict/>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
+              <key>UISupportedInterfaceOrientations~ipad</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+                  <string>UIInterfaceOrientationPortraitUpsideDown</string>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
+          </dict>
+          </plist>
+          PLIST
+
+          DEPLOYMENT_TARGET="${{ github.event.inputs.deployment_target || '16.0' }}"
+
+          cat > project.yml <<YAML
+          name: ChatGPTWebView
+          options:
+            minimumXcodeGenVersion: 2.38.0
+            deploymentTarget:
+              iOS: "$DEPLOYMENT_TARGET"
+          settings:
+            base:
+              IPHONEOS_DEPLOYMENT_TARGET: "$DEPLOYMENT_TARGET"
+              SWIFT_VERSION: "5.0"
+              MARKETING_VERSION: "1.0"
+              CURRENT_PROJECT_VERSION: "1"
+              CODE_SIGN_STYLE: Manual
+          targets:
+            ChatGPTWebView:
+              type: application
+              platform: iOS
+              deploymentTarget: "$DEPLOYMENT_TARGET"
+              sources:
+                - path: GeneratedChatGPTWebView
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.deerspotter.ChatGPTWebView
+                  PRODUCT_NAME: ChatGPTWebView
+                  INFOPLIST_FILE: GeneratedChatGPTWebView/Info.plist
+          YAML
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          test -f ChatGPTWebView.xcodeproj/project.pbxproj
+
+      - name: Archive app without signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          DEPLOYMENT_TARGET="${{ github.event.inputs.deployment_target || '16.0' }}"
+
+          xcodebuild clean archive \
+            -project ChatGPTWebView.xcodeproj \
+            -scheme ChatGPTWebView \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/ChatGPTWebView.xcarchive" \
+            IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find build/ChatGPTWebView.xcarchive/Products/Applications -maxdepth 1 -name '*.app' | head -n 1 || true)"
+
+          if [ -z "$APP_PATH" ]; then
+            echo "Archive completed but no .app was found under Products/Applications." >&2
+            exit 22
+          fi
+
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          (cd build && zip -qry ChatGPT-WebView-ios16-unsigned.ipa Payload)
+          ls -lh build/ChatGPT-WebView-ios16-unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatGPT-WebView-ios16-unsigned-ipa
+          path: build/ChatGPT-WebView-ios16-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload generated project artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatGPT-WebView-generated-xcode-project
+          path: |
+            GeneratedChatGPTWebView
+            ChatGPTWebView.xcodeproj
+            project.yml
+          if-no-files-found: error
+          retention-days: 14

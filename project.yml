@@ -1,0 +1,26 @@
+name: ChatGPTWebView
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "2.10.19"
+    CURRENT_PROJECT_VERSION: "99"
+    CODE_SIGN_STYLE: Manual
+targets:
+  ChatGPTWebView:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: ChatGPTWebView
+      - path: AppMemory
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.deerspotter.ChatGPTWebView
+        PRODUCT_NAME: ContextPort
+        INFOPLIST_FILE: ChatGPTWebView/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

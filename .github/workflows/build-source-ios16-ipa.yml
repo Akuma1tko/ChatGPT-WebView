@@ -1,0 +1,166 @@
+name: Build ContextPort iOS IPA (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Build configuration
+        required: true
+        default: Release
+        type: choice
+        options:
+          - Release
+          - Debug
+      deployment_target:
+        description: Minimum iOS deployment target
+        required: true
+        default: "16.0"
+        type: string
+      cache_version:
+        description: Reuse the same value to reuse an IPA; change it to force a rebuild
+        required: true
+        default: v1
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-contextport-ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_PATH: ChatGPTWebView.xcodeproj
+  SCHEME_NAME: ChatGPTWebView
+  ARCHIVE_PATH: build/ChatGPTWebView.xcarchive
+  ARTIFACTS_PATH: artifacts
+  BUILD_CONFIGURATION: ${{ inputs.configuration }}
+  DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
+
+jobs:
+  build-ipa:
+    name: Build ContextPort unsigned IPA
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Restore an IPA already built for this commit
+        id: ipa_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: artifacts
+          key: contextport-unsigned-ipa-${{ runner.os }}-${{ inputs.configuration }}-ios${{ inputs.deployment_target }}-${{ github.sha }}-${{ inputs.cache_version }}
+
+      - name: Identify Xcode cache version
+        if: steps.ipa_cache.outputs.cache-hit != 'true'
+        id: xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcode-select -p
+          VERSION_HASH="$(xcodebuild -version | shasum -a 256 | cut -c1-12)"
+          echo "cache_key=${VERSION_HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore reusable Xcode build data
+        if: steps.ipa_cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: contextport-derived-data-${{ runner.os }}-${{ steps.xcode.outputs.cache_key }}-${{ inputs.configuration }}-ios${{ inputs.deployment_target }}-${{ hashFiles('project.yml', 'ChatGPTWebView/**/*.swift', 'ChatGPTWebView/**/*.m', 'ChatGPTWebView/**/*.h', 'ChatGPTWebView/**/*.xcassets/**', 'ChatGPTWebView/Resources/**', 'AppMemory/**/*.swift') }}
+          restore-keys: |
+            contextport-derived-data-${{ runner.os }}-${{ steps.xcode.outputs.cache_key }}-${{ inputs.configuration }}-ios${{ inputs.deployment_target }}-
+
+      - name: Install XcodeGen
+        if: steps.ipa_cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        if: steps.ipa_cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          test -f "$PROJECT_PATH/project.pbxproj"
+
+      - name: Build the unsigned ContextPort app
+        if: steps.ipa_cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf build "$ARTIFACTS_PATH"
+          mkdir -p build "$ARTIFACTS_PATH/Payload"
+
+          xcodebuild archive \
+            -project "$PROJECT_PATH" \
+            -scheme "$SCHEME_NAME" \
+            -configuration "$BUILD_CONFIGURATION" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/$ARCHIVE_PATH" \
+            IPHONEOS_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+          APP_PATH="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name '*.app' | head -n 1 || true)"
+          if [[ -z "$APP_PATH" ]]; then
+            echo "Archive completed but no app bundle was found." >&2
+            exit 22
+          fi
+
+          APP_NAME="$(basename "$APP_PATH")"
+          ditto "$APP_PATH" "$ARTIFACTS_PATH/Payload/$APP_NAME"
+
+          SHORT_SHA="${GITHUB_SHA::7}"
+          IPA_NAME="ContextPort-${SHORT_SHA}-${BUILD_CONFIGURATION}.ipa"
+          (
+            cd "$ARTIFACTS_PATH"
+            ditto -c -k --sequesterRsrc --keepParent Payload "$IPA_NAME"
+            rm -rf Payload
+          )
+
+      - name: Save the IPA for identical future requests
+        if: steps.ipa_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: artifacts
+          key: contextport-unsigned-ipa-${{ runner.os }}-${{ inputs.configuration }}-ios${{ inputs.deployment_target }}-${{ github.sha }}-${{ inputs.cache_version }}
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ContextPort-${{ inputs.configuration }}-${{ github.sha }}
+          path: artifacts/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Write build summary
+        shell: bash
+        run: |
+          {
+            echo "## ContextPort iOS IPA"
+            echo
+            echo "- Configuration: \`$BUILD_CONFIGURATION\`"
+            echo "- Minimum iOS version: \`$DEPLOYMENT_TARGET\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Reused cached IPA: \`${{ steps.ipa_cache.outputs.cache-hit == 'true' }}\`"
+            echo "- Signing: unsigned"
+            echo
+            echo "Download the IPA from the workflow run's Artifacts section. It must be signed before installation on an iPhone."
+          } >> "$GITHUB_STEP_SUMMARY"

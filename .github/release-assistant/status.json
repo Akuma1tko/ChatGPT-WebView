@@ -1,0 +1,12 @@
+{
+  "request_id": "2026-07-20-contextport-2.10.18-build-98",
+  "tag_name": "v2.10.18",
+  "name": "ContextPort 2.10.18",
+  "target_commitish": "c2e7a09d7d7c7419809fc38403656635baf40835",
+  "action": "updated",
+  "release_id": 356732964,
+  "release_url": "https://github.com/DeerSpotter/ContextPort/releases/tag/untagged-4728451f3a0633704e90",
+  "draft": true,
+  "prerelease": false,
+  "completed_at": "2026-07-20T13:15:34.511Z"
+}

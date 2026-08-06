@@ -1,0 +1,309 @@
+name: Bootstrap iOS 16 Xcode Project
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/bootstrap-ios16-webview-project.yml"
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: "Branch to create or update with the generated Xcode project"
+        required: false
+        default: "bootstrap/ios16-webview-project"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bootstrap-project:
+    name: Generate clean iOS 16 WebView project
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git author
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create or switch bootstrap branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH_NAME="${{ github.event.inputs.branch_name || 'bootstrap/ios16-webview-project' }}"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> "$GITHUB_ENV"
+
+          git fetch origin main
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
+            git checkout "$BRANCH_NAME"
+            git pull --ff-only origin "$BRANCH_NAME"
+          else
+            git checkout -B "$BRANCH_NAME" origin/main
+          fi
+
+      - name: Generate source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ChatGPTWebView
+
+          cat > ChatGPTWebView/ChatGPTWebViewApp.swift <<'SWIFT'
+          import SwiftUI
+
+          @main
+          struct ChatGPTWebViewApp: App {
+              var body: some Scene {
+                  WindowGroup {
+                      ContentView()
+                  }
+              }
+          }
+          SWIFT
+
+          cat > ChatGPTWebView/ContentView.swift <<'SWIFT'
+          import SwiftUI
+
+          struct ContentView: View {
+              var body: some View {
+                  SecureChatGPTWebView(url: URL(string: "https://chatgpt.com/")!)
+                      .ignoresSafeArea(.keyboard, edges: .bottom)
+              }
+          }
+          SWIFT
+
+          cat > ChatGPTWebView/SecureChatGPTWebView.swift <<'SWIFT'
+          import SwiftUI
+          import WebKit
+
+          struct SecureChatGPTWebView: UIViewRepresentable {
+              let url: URL
+
+              func makeCoordinator() -> Coordinator {
+                  Coordinator()
+              }
+
+              func makeUIView(context: Context) -> WKWebView {
+                  let configuration = WKWebViewConfiguration()
+                  configuration.websiteDataStore = .default()
+                  configuration.allowsInlineMediaPlayback = true
+
+                  if #available(iOS 14.0, *) {
+                      configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+                  }
+
+                  let webView = WKWebView(frame: .zero, configuration: configuration)
+                  webView.navigationDelegate = context.coordinator
+                  webView.uiDelegate = context.coordinator
+                  webView.allowsBackForwardNavigationGestures = true
+                  webView.scrollView.keyboardDismissMode = .interactive
+                  webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+                  webView.load(URLRequest(url: url))
+                  return webView
+              }
+
+              func updateUIView(_ webView: WKWebView, context: Context) {
+                  if webView.url == nil {
+                      webView.load(URLRequest(url: url))
+                  }
+              }
+
+              final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+                  private let allowedHostSuffixes = [
+                      "chatgpt.com",
+                      "openai.com",
+                      "oaistatic.com",
+                      "oaiusercontent.com"
+                  ]
+
+                  func webView(_ webView: WKWebView,
+                               decidePolicyFor navigationAction: WKNavigationAction,
+                               decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                      guard let url = navigationAction.request.url else {
+                          decisionHandler(.cancel)
+                          return
+                      }
+
+                      decisionHandler(isAllowed(url: url) ? .allow : .cancel)
+                  }
+
+                  private func isAllowed(url: URL) -> Bool {
+                      guard let scheme = url.scheme?.lowercased() else {
+                          return false
+                      }
+
+                      if scheme == "about" || scheme == "blob" {
+                          return true
+                      }
+
+                      guard scheme == "https", let host = url.host?.lowercased() else {
+                          return false
+                      }
+
+                      return allowedHostSuffixes.contains { suffix in
+                          host == suffix || host.hasSuffix("." + suffix)
+                      }
+                  }
+
+                  @available(iOS 15.0, *)
+                  func webView(_ webView: WKWebView,
+                               requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                               initiatedByFrame frame: WKFrameInfo,
+                               type: WKMediaCaptureType,
+                               decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+                      decisionHandler(.prompt)
+                  }
+              }
+          }
+          SWIFT
+
+          cat > ChatGPTWebView/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>$(DEVELOPMENT_LANGUAGE)</string>
+              <key>CFBundleDisplayName</key>
+              <string>ChatGPT WebView</string>
+              <key>CFBundleExecutable</key>
+              <string>$(EXECUTABLE_NAME)</string>
+              <key>CFBundleIdentifier</key>
+              <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>$(PRODUCT_NAME)</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>$(MARKETING_VERSION)</string>
+              <key>CFBundleVersion</key>
+              <string>$(CURRENT_PROJECT_VERSION)</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>NSMicrophoneUsageDescription</key>
+              <string>Microphone access is used only when ChatGPT web voice input requests it.</string>
+              <key>NSSpeechRecognitionUsageDescription</key>
+              <string>Speech recognition is used only when ChatGPT web voice input requests it.</string>
+              <key>UIApplicationSupportsIndirectInputEvents</key>
+              <true/>
+              <key>UILaunchScreen</key>
+              <dict/>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
+              <key>UISupportedInterfaceOrientations~ipad</key>
+              <array>
+                  <string>UIInterfaceOrientationPortrait</string>
+                  <string>UIInterfaceOrientationPortraitUpsideDown</string>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
+          </dict>
+          </plist>
+          PLIST
+
+          cat > project.yml <<'YAML'
+          name: ChatGPTWebView
+          options:
+            minimumXcodeGenVersion: 2.38.0
+            deploymentTarget:
+              iOS: "16.0"
+          settings:
+            base:
+              IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+              SWIFT_VERSION: "5.0"
+              MARKETING_VERSION: "1.0"
+              CURRENT_PROJECT_VERSION: "1"
+              CODE_SIGN_STYLE: Manual
+          targets:
+            ChatGPTWebView:
+              type: application
+              platform: iOS
+              deploymentTarget: "16.0"
+              sources:
+                - path: ChatGPTWebView
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.deerspotter.ChatGPTWebView
+                  INFOPLIST_FILE: ChatGPTWebView/Info.plist
+          YAML
+
+          cat > SECURITY_NOTES.md <<'MARKDOWN'
+          # Security notes
+
+          This generated project is a clean, auditable iOS 16 WKWebView wrapper.
+
+          It intentionally avoids:
+
+          - JavaScript injection
+          - reading cookies from the WebView
+          - sending credentials to any custom server
+          - proxying ChatGPT traffic
+          - loading arbitrary non OpenAI domains inside the WebView
+
+          The WebView starts at `https://chatgpt.com/` and allows navigation only to a small OpenAI related domain allowlist in `SecureChatGPTWebView.swift`.
+
+          This project does not prove that any upstream release IPA is safe. It is a clean replacement project that can be built and audited from source.
+          MARKDOWN
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen generate
+          test -f ChatGPTWebView.xcodeproj/project.pbxproj
+
+      - name: Commit generated project branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add ChatGPTWebView project.yml ChatGPTWebView.xcodeproj SECURITY_NOTES.md
+
+          if git diff --cached --quiet; then
+            echo "No generated project changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Bootstrap clean iOS 16 ChatGPT WebView project"
+          git push -u origin "$BRANCH_NAME"
+
+      - name: Open pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          EXISTING_PR="$(gh pr list --head "$BRANCH_NAME" --base main --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING_PR" ]; then
+            echo "Pull request already exists: #$EXISTING_PR"
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH_NAME" \
+            --title "[bootstrap] Add clean iOS 16 ChatGPT WebView project" \
+            --body "Adds a clean, source controlled iOS 16 WKWebView project for ChatGPT. This does not recover the upstream release source, but it creates an auditable replacement project with no JavaScript injection, no cookie exfiltration, and no custom credential handling."
